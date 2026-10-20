@@ -1,0 +1,14 @@
+# Image build-context excludes — keep a build to what it actually installs.
+.venv/
+.git/
+.claude/
+.decode/
+.pytest_cache/
+.ruff_cache/
+**/__pycache__/
+*.pyc
+dist/
+tests/
+docs/
+tasks/
+.env

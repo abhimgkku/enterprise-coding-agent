@@ -1,0 +1,18 @@
+{
+  "enabledPlugins": {
+    "squid@iusztinpaul": true,
+    "context7@claude-plugins-official": true,
+    "code-review@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": true,
+    "kitaru@kitaru": true,
+    "caveman@caveman": true
+  },
+  "extraKnownMarketplaces": {
+    "iusztinpaul": {
+      "source": {
+        "source": "github",
+        "repo": "iusztinpaul/squid"
+      }
+    }
+  }
+}
