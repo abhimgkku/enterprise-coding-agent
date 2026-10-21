@@ -1,5 +1,5 @@
 # Supply a digest-pinned base image through --build-arg BASE_IMAGE.
-ARG BASE_IMAGE
+ARG BASE_IMAGE=ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 FROM ${BASE_IMAGE}
 
 USER root

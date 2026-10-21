@@ -251,6 +251,10 @@ class Settings(BaseSettings):
     sandbox_image: str = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
     # Docker resource limits per sandbox.
     # CPU uses Docker's CPU quota units, not Modal physical-core units.
+    # Transitional opt-in: use the prebuilt non-root Docker worker.
+    # Modal continues using sandbox_image.
+    sandbox_docker_prebuilt: bool = False
+    sandbox_docker_image: str = "decode-sandbox:local-v1"
     sandbox_docker_cpus: float = Field(
         default=1.0,
         gt=0,

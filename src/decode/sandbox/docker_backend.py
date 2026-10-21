@@ -111,13 +111,33 @@ class DockerBackend:
                 f"docker run failed (exit {proc.returncode}): {_decode(stderr).strip()}"
             )
         self._container_id = _decode(stdout).strip()
-        logger.info(
-            "[sandbox] docker start %s image=%s", self._container_id, settings.sandbox_image
+        # logger.info(
+        #     "[sandbox] docker start %s image=%s", self._container_id, settings.sandbox_image)
+
+        image = (
+            settings.sandbox_docker_image
+            if settings.sandbox_docker_prebuilt
+            else settings.sandbox_image
         )
+        logger.info(
+            "[sandbox] docker start %s image=%s",
+            self._container_id,
+            image,
+        )
+
         # Install git + gh in EVERY worker (the slim base ships none), and — when a token was
         # injected — git's credential helper alongside. Best-effort: a failed install leaves the
         # session up with no git.
-        await self._install_git(self._container_id)
+        # await self._install_git(self._container_id)
+        if settings.sandbox_docker_prebuilt:
+            try:
+                await self._prepare_prebuilt_worker(self._container_id)
+            except BaseException:
+                # A worker that fails initialization must not remain usable.
+                await self.destroy()
+                raise
+        else:
+            await self._install_git(self._container_id)
 
     async def export(self) -> None:
         """No-op: the bind mount is live, so the host Workspace already IS the sandbox filesystem (§5)."""
@@ -286,11 +306,44 @@ class DockerBackend:
     #         args += ["-e", GIT_TOKEN_ENV]
     #     args += [settings.sandbox_image, "sleep", "infinity"]
     #     return args
-    def _run_args(self, workspace: Path) -> list[str]:
-        """Build the keeper-container command with explicit resource limits.
+    # def _run_args(self, workspace: Path) -> list[str]:
+    #     """Build the keeper-container command with explicit resource limits.
 
-        Equal memory and memory-swap limits disable additional container swap.
-        Git-token injection retains its existing behavior in this milestone.
+    #     Equal memory and memory-swap limits disable additional container swap.
+    #     Git-token injection retains its existing behavior in this milestone.
+    #     """
+    #     memory_limit = f"{settings.sandbox_docker_memory_mb}m"
+
+    #     args = [
+    #         "run",
+    #         "-d",
+    #         "--rm",
+    #         "--cpus",
+    #         str(settings.sandbox_docker_cpus),
+    #         "--memory",
+    #         memory_limit,
+    #         "--memory-swap",
+    #         memory_limit,
+    #         "--pids-limit",
+    #         str(settings.sandbox_docker_pids_limit),
+    #         "-v",
+    #         f"{workspace}:{_WORKSPACE}",
+    #         "-w",
+    #         _WORKSPACE,
+    #     ]
+
+    #     if sandbox_git_token():
+    #         args += ["-e", GIT_TOKEN_ENV]
+
+    #     args += [settings.sandbox_image, "sleep", "infinity"]
+    #     return args
+
+    def _run_args(self, workspace: Path) -> list[str]:
+        """Build a resource-limited Docker worker command.
+
+        Prebuilt mode runs as the host's non-root UID/GID and refuses
+        sandbox Git-token injection. The legacy path is retained during
+        the migration.
         """
         memory_limit = f"{settings.sandbox_docker_memory_mb}m"
 
@@ -312,11 +365,89 @@ class DockerBackend:
             _WORKSPACE,
         ]
 
-        if sandbox_git_token():
-            args += ["-e", GIT_TOKEN_ENV]
+        if settings.sandbox_docker_prebuilt:
+            if sandbox_git_token():
+                raise RuntimeError(
+                    "Prebuilt Docker mode does not accept SANDBOX_GIT_TOKEN. "
+                    "Keep publishing credentials outside the sandbox."
+                )
 
-        args += [settings.sandbox_image, "sleep", "infinity"]
+            uid = os.getuid()
+            gid = os.getgid()
+
+            if uid == 0 or gid == 0:
+                raise RuntimeError(
+                    "Prebuilt Docker mode requires a non-root host UID and GID. "
+                    "Run decode as your normal WSL/Linux user."
+                )
+
+            args += [
+                "--pull=never",
+                "--user",
+                f"{uid}:{gid}",
+                "--cap-drop",
+                "ALL",
+                "--security-opt",
+                "no-new-privileges=true",
+            ]
+            image = settings.sandbox_docker_image
+        else:
+            if sandbox_git_token():
+                args += ["-e", GIT_TOKEN_ENV]
+            image = settings.sandbox_image
+
+        args += [image, "sleep", "infinity"]
         return args
+
+    async def _prepare_prebuilt_worker(self, container_id: str) -> None:
+        """Validate the prebuilt worker and configure Git without installing tools."""
+        checks = [
+            'test "$(id -u)" -ne 0',
+            'test -n "$HOME"',
+            'test -w "$HOME"',
+            "test -w /workspace",
+            *[f"command -v {tool} >/dev/null" for tool in ("bash", "python", "uv", "git", "gh")],
+        ]
+
+        checks.extend(
+            f"git config --global {shlex.quote(key)} {shlex.quote(value)}"
+            for key, value in git_config_pairs()
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "exec",
+            container_id,
+            "sh",
+            "-c",
+            " && ".join(checks),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=30.0,
+            )
+        except BaseException:
+            if proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+            await proc.wait()
+            raise
+
+        if proc.returncode != 0:
+            detail = _decode(stderr or stdout).strip()[-1000:]
+            raise RuntimeError(
+                "Prebuilt Docker worker initialization failed "
+                f"(exit {proc.returncode}): {detail or 'a required check failed'}"
+            )
+
+        logger.info(
+            "[sandbox] prebuilt worker ready %s",
+            container_id[:12],
+        )
 
     async def _install_git(self, container_id: str) -> None:
         """Best-effort ``apt-get install`` of git + gh, then git config, in the fresh worker.
