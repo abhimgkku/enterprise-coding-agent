@@ -43,10 +43,31 @@ def _fake_proc(mocker, *, stdout=b"", stderr=b"", returncode=0):
 
 # docker run argv — ONE shape; the only variation is the GITHUB_TOKEN pass-through (ADR-0016 §2)
 
+# _NO_TOKEN_ARGS = [
+#     "run",
+#     "-d",
+#     "--rm",
+#     "-v",
+#     f"/ws:{_WORKSPACE}",
+#     "-w",
+#     _WORKSPACE,
+#     settings.sandbox_image,
+#     "sleep",
+#     "infinity",
+# ]
+
 _NO_TOKEN_ARGS = [
     "run",
     "-d",
     "--rm",
+    "--cpus",
+    str(settings.sandbox_docker_cpus),
+    "--memory",
+    f"{settings.sandbox_docker_memory_mb}m",
+    "--memory-swap",
+    f"{settings.sandbox_docker_memory_mb}m",
+    "--pids-limit",
+    str(settings.sandbox_docker_pids_limit),
     "-v",
     f"/ws:{_WORKSPACE}",
     "-w",
@@ -73,21 +94,29 @@ def test_run_args_add_a_valueless_token_passthrough_when_the_token_is_set(monkey
 
     args = DockerBackend()._run_args(Path("/ws"))
 
+    # assert args == [
+    #     "run",
+    #     "-d",
+    #     "--rm",
+    #     "-v",
+    #     f"/ws:{_WORKSPACE}",
+    #     "-w",
+    #     _WORKSPACE,
+    #     "-e",
+    #     GIT_TOKEN_ENV,
+    #     settings.sandbox_image,
+    #     "sleep",
+    #     "infinity",
+    # ]
+    # assert not any("ghp_secret_value" in arg for arg in args)  # SECURITY: no token in the argv
+
     assert args == [
-        "run",
-        "-d",
-        "--rm",
-        "-v",
-        f"/ws:{_WORKSPACE}",
-        "-w",
-        _WORKSPACE,
+        *_NO_TOKEN_ARGS[:-3],
         "-e",
         GIT_TOKEN_ENV,
-        settings.sandbox_image,
-        "sleep",
-        "infinity",
+        *_NO_TOKEN_ARGS[-3:],
     ]
-    assert not any("ghp_secret_value" in arg for arg in args)  # SECURITY: no token in the argv
+    assert "ghp_secret_value" not in " ".join(args)
 
 
 def test_run_args_are_byte_identical_for_an_empty_token(monkeypatch):

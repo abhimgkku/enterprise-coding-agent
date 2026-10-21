@@ -272,18 +272,49 @@ class DockerBackend:
 
     # --- docker run argv ------------------------------------------------------------------------
 
-    def _run_args(self, workspace: Path) -> list[str]:
-        """Build the ``docker run`` argv for the keeper container — ONE shape (ADR-0016 §1,2).
+    # def _run_args(self, workspace: Path) -> list[str]:
+    #     """Build the ``docker run`` argv for the keeper container — ONE shape (ADR-0016 §1,2).
 
-        Mount ``workspace`` at ``/workspace`` and run ``sleep infinity``. The only variation: a set
-        ``SANDBOX_GIT_TOKEN`` adds a **value-less** ``-e GITHUB_TOKEN``, which docker fills from the
-        client's env (:func:`_run_env`) — so the secret never enters an argv a host ``ps`` (or a
-        rendered error) could read. Unset → byte-identical to the no-token run. No skills mount —
-        skills are seeded host-side into the Workspace (ADR-0012 §5).
+    #     Mount ``workspace`` at ``/workspace`` and run ``sleep infinity``. The only variation: a set
+    #     ``SANDBOX_GIT_TOKEN`` adds a **value-less** ``-e GITHUB_TOKEN``, which docker fills from the
+    #     client's env (:func:`_run_env`) — so the secret never enters an argv a host ``ps`` (or a
+    #     rendered error) could read. Unset → byte-identical to the no-token run. No skills mount —
+    #     skills are seeded host-side into the Workspace (ADR-0012 §5).
+    #     """
+    #     args = ["run", "-d", "--rm", "-v", f"{workspace}:{_WORKSPACE}", "-w", _WORKSPACE]
+    #     if sandbox_git_token():
+    #         args += ["-e", GIT_TOKEN_ENV]
+    #     args += [settings.sandbox_image, "sleep", "infinity"]
+    #     return args
+    def _run_args(self, workspace: Path) -> list[str]:
+        """Build the keeper-container command with explicit resource limits.
+
+        Equal memory and memory-swap limits disable additional container swap.
+        Git-token injection retains its existing behavior in this milestone.
         """
-        args = ["run", "-d", "--rm", "-v", f"{workspace}:{_WORKSPACE}", "-w", _WORKSPACE]
+        memory_limit = f"{settings.sandbox_docker_memory_mb}m"
+
+        args = [
+            "run",
+            "-d",
+            "--rm",
+            "--cpus",
+            str(settings.sandbox_docker_cpus),
+            "--memory",
+            memory_limit,
+            "--memory-swap",
+            memory_limit,
+            "--pids-limit",
+            str(settings.sandbox_docker_pids_limit),
+            "-v",
+            f"{workspace}:{_WORKSPACE}",
+            "-w",
+            _WORKSPACE,
+        ]
+
         if sandbox_git_token():
             args += ["-e", GIT_TOKEN_ENV]
+
         args += [settings.sandbox_image, "sleep", "infinity"]
         return args
 

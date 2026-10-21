@@ -249,6 +249,21 @@ class Settings(BaseSettings):
     # ``bash``. The uv variant of python-slim means both sandboxes run python via ``uv`` out of the
     # box (skill payloads say ``uv run …``). git is NOT in the slim base, so each backend adds it.
     sandbox_image: str = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
+    # Docker resource limits per sandbox.
+    # CPU uses Docker's CPU quota units, not Modal physical-core units.
+    sandbox_docker_cpus: float = Field(
+        default=1.0,
+        gt=0,
+        allow_inf_nan=False,
+    )
+    sandbox_docker_memory_mb: int = Field(
+        default=2048,
+        ge=128,
+    )
+    sandbox_docker_pids_limit: int = Field(
+        default=256,
+        ge=16,
+    )
     # The git identity preconfigured in the sandbox so a model ``git commit`` succeeds. Defaults to
     # the same identity the hand-back stamps its capture commit with (``sandbox/handback.py``);
     # override to author as yourself or a bot, set both empty to skip.
